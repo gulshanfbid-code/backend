@@ -77,6 +77,7 @@ public class YtDlpExecutor {
     }
 
     private File executeDownload(CommandLine commandLine) throws IOException {
+
         ByteArrayOutputStream stdout = new ByteArrayOutputStream();
         ByteArrayOutputStream stderr = new ByteArrayOutputStream();
 
@@ -86,24 +87,81 @@ public class YtDlpExecutor {
         try {
             executor.execute(commandLine);
         } catch (IOException exception) {
-            String error = stderr.toString(StandardCharsets.UTF_8).trim();
+
+            String error =
+                    stderr.toString(StandardCharsets.UTF_8).trim();
+
             throw new IOException(
-                    "yt-dlp download failed" + (error.isEmpty() ? "" : ": " + error),
+                    "yt-dlp download failed"
+                            + (error.isEmpty() ? "" : ": " + error),
                     exception
             );
         }
 
-        String output = stdout.toString(StandardCharsets.UTF_8).trim();
+        String output =
+                stdout.toString(StandardCharsets.UTF_8).trim();
+
         if (output.isEmpty()) {
-            throw new IOException("yt-dlp did not return the downloaded file path");
+            throw new IOException(
+                    "yt-dlp did not return the downloaded file path"
+            );
         }
 
+        /*
+         * yt-dlp may print additional output.
+         * The after_move:filepath value should be the final line.
+         */
         String[] lines = output.split("\\R");
-        String actualPath = lines[lines.length - 1].trim();
-        File downloadedFile = new File(actualPath);
 
-        if (!downloadedFile.exists() || !downloadedFile.isFile()) {
-            throw new IOException("Downloaded file was not found: " + actualPath);
+        String actualPath =
+                lines[lines.length - 1].trim();
+
+        /*
+         * Remove surrounding quotes if present.
+         *
+         * Example:
+         * "downloads/Video [ABC].mp4"
+         *
+         * becomes:
+         * downloads/Video [ABC].mp4
+         */
+        if (actualPath.length() >= 2
+                && actualPath.startsWith("\"")
+                && actualPath.endsWith("\"")) {
+
+            actualPath =
+                    actualPath.substring(
+                            1,
+                            actualPath.length() - 1
+                    );
+        }
+
+        /*
+         * Remove accidental surrounding single quotes too.
+         */
+        if (actualPath.length() >= 2
+                && actualPath.startsWith("'")
+                && actualPath.endsWith("'")) {
+
+            actualPath =
+                    actualPath.substring(
+                            1,
+                            actualPath.length() - 1
+                    );
+        }
+
+        actualPath = actualPath.trim();
+
+        File downloadedFile =
+                new File(actualPath);
+
+        if (!downloadedFile.exists()
+                || !downloadedFile.isFile()) {
+
+            throw new IOException(
+                    "Downloaded file was not found: "
+                            + actualPath
+            );
         }
 
         return downloadedFile;
