@@ -1,27 +1,42 @@
-FROM maven:3.9.9-eclipse-temurin-21 AS build
+# ==============================
+# Build stage
+# ==============================
+FROM maven:3.9-eclipse-temurin-21 AS build
 
 WORKDIR /app
 
 COPY pom.xml .
+
+RUN mvn dependency:go-offline -B
+
 COPY src ./src
 
 RUN mvn clean package -DskipTests
 
 
+# ==============================
+# Runtime stage
+# ==============================
 FROM eclipse-temurin:21-jre
 
 WORKDIR /app
 
-RUN apt-get update && \
-    apt-get install -y python3 python3-pip ffmpeg && \
-    rm -rf /var/lib/apt/lists/*
+# Install FFmpeg and yt-dlp
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       ffmpeg \
+       python3 \
+       python3-pip \
+    && pip3 install --break-system-packages yt-dlp \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install --no-cache-dir --break-system-packages yt-dlp
-
+# Copy Spring Boot JAR
 COPY --from=build /app/target/*.jar app.jar
 
+# Download directory
 RUN mkdir -p /app/downloads
 
-EXPOSE 8888
+EXPOSE 8080
 
 ENTRYPOINT ["java", "-jar", "app.jar"]
