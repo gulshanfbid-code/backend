@@ -36,13 +36,15 @@ public class YtDlpExecutor {
     ) throws IOException {
 
         File downloadDirectory =
-                new File(config.getDownloadDir());
+                new File(config.getDownloadDir())
+                        .getAbsoluteFile();
 
         if (!downloadDirectory.exists()
                 && !downloadDirectory.mkdirs()) {
 
             throw new IOException(
-                    "Unable to create download directory"
+                    "Unable to create download directory: "
+                            + downloadDirectory
             );
         }
 
@@ -63,6 +65,10 @@ public class YtDlpExecutor {
         commandLine.addArgument("--ffmpeg-location");
         commandLine.addArgument(config.getFfmpegPath());
 
+        /*
+         * Tell yt-dlp to print the final file path
+         * after all post-processing is complete.
+         */
         commandLine.addArgument("--print");
         commandLine.addArgument("after_move:filepath");
 
@@ -90,12 +96,25 @@ public class YtDlpExecutor {
             commandLine.addArgument("mp4");
         }
 
+        /*
+         * IMPORTANT:
+         *
+         * Use only the filename template here.
+         * The working directory is supplied separately
+         * to DefaultExecutor below.
+         */
+        String fileNameTemplate =
+                "%(title)s [%(id)s].%(ext)s";
+
         commandLine.addArgument("-o");
-        commandLine.addArgument(outputPath);
+        commandLine.addArgument(fileNameTemplate);
 
         commandLine.addArgument(url);
 
-        return executeDownload(commandLine);
+        return executeDownload(
+                commandLine,
+                downloadDirectory
+        );
     }
 
     private String buildVideoFormat(String quality) {
@@ -117,7 +136,8 @@ public class YtDlpExecutor {
     }
 
     private File executeDownload(
-            CommandLine commandLine
+            CommandLine commandLine,
+            File downloadDirectory
     ) throws IOException {
 
         ByteArrayOutputStream stdout =
@@ -127,13 +147,39 @@ public class YtDlpExecutor {
                 new ByteArrayOutputStream();
 
         DefaultExecutor executor =
-                DefaultExecutor.builder().get();
+                DefaultExecutor.builder()
+                        .setWorkingDirectory(downloadDirectory)
+                        .get();
 
         executor.setStreamHandler(
                 new PumpStreamHandler(
                         stdout,
                         stderr
                 )
+        );
+
+        System.out.println(
+                "========================================"
+        );
+
+        System.out.println(
+                "YT-DLP DOWNLOAD DIRECTORY:"
+        );
+
+        System.out.println(
+                downloadDirectory.getAbsolutePath()
+        );
+
+        System.out.println(
+                "YT-DLP COMMAND:"
+        );
+
+        System.out.println(
+                commandLine
+        );
+
+        System.out.println(
+                "========================================"
         );
 
         try {
@@ -163,16 +209,6 @@ public class YtDlpExecutor {
                         StandardCharsets.UTF_8
                 ).trim();
 
-        /*
-         * ==========================================
-         * DEBUG LOGGING
-         * ==========================================
-         *
-         * This shows exactly what yt-dlp returned.
-         * Do not remove these logs until we identify
-         * the filename problem on Railway.
-         */
-
         System.out.println(
                 "========================================"
         );
@@ -194,22 +230,11 @@ public class YtDlpExecutor {
             );
         }
 
-        /*
-         * yt-dlp can return multiple lines.
-         * The after_move:filepath output should be
-         * the final line.
-         */
-
         String[] lines =
                 output.split("\\R");
 
         String actualPath =
                 lines[lines.length - 1].trim();
-
-        /*
-         * DEBUG:
-         * Show the exact path selected from yt-dlp output.
-         */
 
         System.out.println(
                 "YT-DLP SELECTED PATH:"
@@ -217,23 +242,10 @@ public class YtDlpExecutor {
 
         System.out.println(actualPath);
 
-        System.out.println(
-                "========================================"
-        );
-
         /*
-         * Remove surrounding double quotes
-         * if yt-dlp returns them.
-         *
-         * Example:
-         *
-         * "downloads/file.mp4"
-         *
-         * becomes:
-         *
-         * downloads/file.mp4
+         * Remove surrounding quotes if they somehow
+         * appear in yt-dlp output.
          */
-
         if (actualPath.length() >= 2
                 && actualPath.startsWith("\"")
                 && actualPath.endsWith("\"")) {
@@ -244,11 +256,6 @@ public class YtDlpExecutor {
                             actualPath.length() - 1
                     );
         }
-
-        /*
-         * Remove surrounding single quotes
-         * if present.
-         */
 
         if (actualPath.length() >= 2
                 && actualPath.startsWith("'")
@@ -264,41 +271,31 @@ public class YtDlpExecutor {
         actualPath =
                 actualPath.trim();
 
-        /*
-         * DEBUG:
-         * Show the final path after quote cleanup.
-         */
-
         System.out.println(
-                "YT-DLP FINAL PATH:"
+                "YT-DLP CLEANED PATH:"
         );
 
         System.out.println(actualPath);
 
-        System.out.println(
-                "========================================"
-        );
-
+        /*
+         * Because yt-dlp is running with /app/downloads
+         * as its working directory, the printed path
+         * should normally point to the downloaded file.
+         */
         File downloadedFile =
                 new File(actualPath);
 
-        /*
-         * Verify that the file actually exists.
-         */
+        if (!downloadedFile.isAbsolute()) {
 
-        if (!downloadedFile.exists()
-                || !downloadedFile.isFile()) {
-
-            throw new IOException(
-                    "Downloaded file was not found: "
-                            + actualPath
-            );
+            downloadedFile =
+                    new File(
+                            downloadDirectory,
+                            actualPath
+                    );
         }
 
-        /*
-         * DEBUG:
-         * Confirm the actual file that Java found.
-         */
+        downloadedFile =
+                downloadedFile.getCanonicalFile();
 
         System.out.println(
                 "ACTUAL DOWNLOADED FILE:"
@@ -317,8 +314,25 @@ public class YtDlpExecutor {
         );
 
         System.out.println(
+                "FILE EXISTS:"
+        );
+
+        System.out.println(
+                downloadedFile.exists()
+        );
+
+        System.out.println(
                 "========================================"
         );
+
+        if (!downloadedFile.exists()
+                || !downloadedFile.isFile()) {
+
+            throw new IOException(
+                    "Downloaded file was not found: "
+                            + downloadedFile
+            );
+        }
 
         return downloadedFile;
     }
@@ -343,7 +357,8 @@ public class YtDlpExecutor {
         }
 
         DefaultExecutor executor =
-                DefaultExecutor.builder().get();
+                DefaultExecutor.builder()
+                        .get();
 
         executor.setStreamHandler(
                 new PumpStreamHandler(
