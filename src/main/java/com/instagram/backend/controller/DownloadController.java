@@ -21,6 +21,11 @@ public class DownloadController {
         this.downloadService = downloadService;
     }
 
+    /**
+     * Starts the media download.
+     *
+     * POST /api/download
+     */
     @PostMapping
     public DownloadResponse download(
             @RequestBody DownloadRequest request
@@ -34,6 +39,11 @@ public class DownloadController {
         );
     }
 
+    /**
+     * Returns the downloaded file.
+     *
+     * GET /api/download/file?fileName=...
+     */
     @GetMapping("/file")
     public ResponseEntity<Resource> downloadFile(
             @RequestParam String fileName
@@ -44,16 +54,73 @@ public class DownloadController {
                         fileName
                 );
 
+        String filename =
+                resource.getFilename();
+
+        /*
+         * Default MIME type.
+         */
+        MediaType mediaType =
+                MediaType.APPLICATION_OCTET_STREAM;
+
+        /*
+         * Detect the actual media type from
+         * the downloaded file extension.
+         */
+        if (filename != null) {
+
+            String lowerCaseFilename =
+                    filename.toLowerCase();
+
+            if (lowerCaseFilename.endsWith(".mp4")) {
+
+                mediaType =
+                        MediaType.parseMediaType(
+                                "video/mp4"
+                        );
+
+            } else if (
+                    lowerCaseFilename.endsWith(".mp3")
+            ) {
+
+                mediaType =
+                        MediaType.parseMediaType(
+                                "audio/mpeg"
+                        );
+
+            } else if (
+                    lowerCaseFilename.endsWith(".m4a")
+            ) {
+
+                mediaType =
+                        MediaType.parseMediaType(
+                                "audio/mp4"
+                        );
+            }
+        }
+
         return ResponseEntity.ok()
-                .contentType(
-                        MediaType.APPLICATION_OCTET_STREAM
-                )
+
+                /*
+                 * Tell the browser the correct
+                 * media type.
+                 */
+                .contentType(mediaType)
+
+                /*
+                 * Force the browser to download
+                 * the file using its real filename.
+                 */
                 .header(
                         HttpHeaders.CONTENT_DISPOSITION,
                         "attachment; filename=\"" +
-                                resource.getFilename() +
+                                filename +
                                 "\""
                 )
+
+                /*
+                 * Send the actual downloaded file.
+                 */
                 .body(resource);
     }
 }

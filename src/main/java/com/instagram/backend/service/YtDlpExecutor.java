@@ -21,6 +21,7 @@ public class YtDlpExecutor {
     }
 
     public String execute(String url) throws IOException {
+
         return run(
                 "--dump-single-json",
                 url
@@ -58,57 +59,131 @@ public class YtDlpExecutor {
                 normalizeAudioFormat(audioFormat);
 
         CommandLine commandLine =
-                new CommandLine(config.getYtDlpPath());
-
-        commandLine.addArgument("--no-playlist");
-
-        commandLine.addArgument("--ffmpeg-location");
-        commandLine.addArgument(config.getFfmpegPath());
+                new CommandLine(
+                        config.getYtDlpPath()
+                );
 
         /*
-         * Tell yt-dlp to print the final file path
-         * after all post-processing is complete.
+         * Do not download playlists.
+         */
+        commandLine.addArgument("--no-playlist");
+
+        /*
+         * Use FFmpeg for merging/conversion.
+         */
+        commandLine.addArgument("--ffmpeg-location");
+        commandLine.addArgument(
+                config.getFfmpegPath()
+        );
+
+        /*
+         * Print the final file path after
+         * yt-dlp has completed all processing.
          */
         commandLine.addArgument("--print");
-        commandLine.addArgument("after_move:filepath");
+        commandLine.addArgument(
+                "after_move:filepath"
+        );
 
+        /*
+         * ================================
+         * AUDIO DOWNLOAD
+         * ================================
+         */
         if ("audio".equals(normalizedMode)) {
 
+            /*
+             * Extract audio from the downloaded media.
+             */
             commandLine.addArgument("-x");
 
-            commandLine.addArgument("--audio-format");
-            commandLine.addArgument(normalizedAudioFormat);
-
-            commandLine.addArgument("--audio-quality");
-            commandLine.addArgument("0");
-
-        } else {
-
-            commandLine.addArgument("-f");
+            /*
+             * Requested audio format:
+             * mp3 or m4a
+             */
             commandLine.addArgument(
-                    buildVideoFormat(normalizedQuality)
+                    "--audio-format"
             );
 
             commandLine.addArgument(
+                    normalizedAudioFormat
+            );
+
+            /*
+             * Best audio quality.
+             */
+            commandLine.addArgument(
+                    "--audio-quality"
+            );
+
+            commandLine.addArgument("0");
+
+        }
+
+        /*
+         * ================================
+         * VIDEO DOWNLOAD
+         * ================================
+         */
+        else {
+
+            /*
+             * Select the requested video quality.
+             */
+            commandLine.addArgument("-f");
+
+            commandLine.addArgument(
+                    buildVideoFormat(
+                            normalizedQuality
+                    )
+            );
+
+            /*
+             * When video and audio are separate,
+             * merge them into MP4.
+             */
+            commandLine.addArgument(
                     "--merge-output-format"
+            );
+
+            commandLine.addArgument("mp4");
+
+            /*
+             * IMPORTANT:
+             *
+             * Ensure the final video is actually
+             * encoded/containerized as MP4.
+             *
+             * This prevents a WebM/other container
+             * from simply being presented as .mp4.
+             */
+            commandLine.addArgument(
+                    "--recode-video"
             );
 
             commandLine.addArgument("mp4");
         }
 
         /*
-         * IMPORTANT:
+         * ================================
+         * OUTPUT FILE
+         * ================================
          *
-         * Use only the filename template here.
-         * The working directory is supplied separately
-         * to DefaultExecutor below.
+         * %(ext)s is intentionally used so yt-dlp
+         * supplies the actual final extension.
          */
         String fileNameTemplate =
                 "%(title)s [%(id)s].%(ext)s";
 
         commandLine.addArgument("-o");
-        commandLine.addArgument(fileNameTemplate);
 
+        commandLine.addArgument(
+                fileNameTemplate
+        );
+
+        /*
+         * Instagram URL.
+         */
         commandLine.addArgument(url);
 
         return executeDownload(
@@ -117,17 +192,44 @@ public class YtDlpExecutor {
         );
     }
 
-    private String buildVideoFormat(String quality) {
+    /**
+     * Builds the yt-dlp video format selector.
+     */
+    private String buildVideoFormat(
+            String quality
+    ) {
 
+        /*
+         * Best available quality.
+         */
         if ("best".equals(quality)) {
+
             return "bv*+ba/b";
         }
 
+        /*
+         * Example:
+         *
+         * 1080p
+         * 720p
+         * 480p
+         * 360p
+         */
         int height =
                 Integer.parseInt(
-                        quality.replace("p", "")
+                        quality.replace(
+                                "p",
+                                ""
+                        )
                 );
 
+        /*
+         * Try to select video up to the requested
+         * height and combine it with the best audio.
+         *
+         * If that exact selection is unavailable,
+         * fall back to the best available format.
+         */
         return "bv*[height<=?"
                 + height
                 + "]+ba/b[height<=?"
@@ -135,6 +237,9 @@ public class YtDlpExecutor {
                 + "]/bv*+ba/b";
     }
 
+    /**
+     * Executes the yt-dlp download command.
+     */
     private File executeDownload(
             CommandLine commandLine,
             File downloadDirectory
@@ -148,7 +253,9 @@ public class YtDlpExecutor {
 
         DefaultExecutor executor =
                 DefaultExecutor.builder()
-                        .setWorkingDirectory(downloadDirectory)
+                        .setWorkingDirectory(
+                                downloadDirectory
+                        )
                         .get();
 
         executor.setStreamHandler(
@@ -167,7 +274,8 @@ public class YtDlpExecutor {
         );
 
         System.out.println(
-                downloadDirectory.getAbsolutePath()
+                downloadDirectory
+                        .getAbsolutePath()
         );
 
         System.out.println(
@@ -195,11 +303,12 @@ public class YtDlpExecutor {
 
             throw new IOException(
                     "yt-dlp download failed"
-                            + (
-                            error.isEmpty()
-                                    ? ""
-                                    : ": " + error
-                    ),
+                            +
+                            (
+                                    error.isEmpty()
+                                            ? ""
+                                            : ": " + error
+                            ),
                     exception
             );
         }
@@ -230,11 +339,20 @@ public class YtDlpExecutor {
             );
         }
 
+        /*
+         * yt-dlp can print multiple lines.
+         *
+         * The last line should contain the final
+         * processed file path because we use:
+         *
+         * after_move:filepath
+         */
         String[] lines =
                 output.split("\\R");
 
         String actualPath =
-                lines[lines.length - 1].trim();
+                lines[lines.length - 1]
+                        .trim();
 
         System.out.println(
                 "YT-DLP SELECTED PATH:"
@@ -243,8 +361,8 @@ public class YtDlpExecutor {
         System.out.println(actualPath);
 
         /*
-         * Remove surrounding quotes if they somehow
-         * appear in yt-dlp output.
+         * Remove surrounding double quotes
+         * if they appear.
          */
         if (actualPath.length() >= 2
                 && actualPath.startsWith("\"")
@@ -257,6 +375,10 @@ public class YtDlpExecutor {
                     );
         }
 
+        /*
+         * Remove surrounding single quotes
+         * if they appear.
+         */
         if (actualPath.length() >= 2
                 && actualPath.startsWith("'")
                 && actualPath.endsWith("'")) {
@@ -278,13 +400,15 @@ public class YtDlpExecutor {
         System.out.println(actualPath);
 
         /*
-         * Because yt-dlp is running with /app/downloads
-         * as its working directory, the printed path
-         * should normally point to the downloaded file.
+         * Convert the printed path into a File.
          */
         File downloadedFile =
                 new File(actualPath);
 
+        /*
+         * If yt-dlp returned a relative path,
+         * resolve it against the download directory.
+         */
         if (!downloadedFile.isAbsolute()) {
 
             downloadedFile =
@@ -294,6 +418,9 @@ public class YtDlpExecutor {
                     );
         }
 
+        /*
+         * Resolve the canonical path.
+         */
         downloadedFile =
                 downloadedFile.getCanonicalFile();
 
@@ -302,7 +429,8 @@ public class YtDlpExecutor {
         );
 
         System.out.println(
-                downloadedFile.getAbsolutePath()
+                downloadedFile
+                        .getAbsolutePath()
         );
 
         System.out.println(
@@ -322,9 +450,21 @@ public class YtDlpExecutor {
         );
 
         System.out.println(
+                "FILE SIZE:"
+        );
+
+        System.out.println(
+                downloadedFile.length()
+                        + " bytes"
+        );
+
+        System.out.println(
                 "========================================"
         );
 
+        /*
+         * Verify the file actually exists.
+         */
         if (!downloadedFile.exists()
                 || !downloadedFile.isFile()) {
 
@@ -334,9 +474,23 @@ public class YtDlpExecutor {
             );
         }
 
+        /*
+         * Prevent an empty file from being returned.
+         */
+        if (downloadedFile.length() == 0) {
+
+            throw new IOException(
+                    "Downloaded file is empty: "
+                            + downloadedFile
+            );
+        }
+
         return downloadedFile;
     }
 
+    /**
+     * Executes yt-dlp commands that return text.
+     */
     private String run(
             String... args
     ) throws IOException {
@@ -353,6 +507,7 @@ public class YtDlpExecutor {
                 );
 
         for (String arg : args) {
+
             commandLine.addArgument(arg);
         }
 
@@ -384,16 +539,20 @@ public class YtDlpExecutor {
 
             throw new IOException(
                     "yt-dlp failed"
-                            + (
-                            error.isEmpty()
-                                    ? ""
-                                    : ": " + error
-                    ),
+                            +
+                            (
+                                    error.isEmpty()
+                                            ? ""
+                                            : ": " + error
+                            ),
                     exception
             );
         }
     }
 
+    /**
+     * Normalize download mode.
+     */
     private String normalizeMode(
             String mode
     ) throws IOException {
@@ -418,6 +577,9 @@ public class YtDlpExecutor {
         return value;
     }
 
+    /**
+     * Normalize video quality.
+     */
     private String normalizeQuality(
             String quality
     ) throws IOException {
@@ -444,6 +606,9 @@ public class YtDlpExecutor {
         return value;
     }
 
+    /**
+     * Normalize audio format.
+     */
     private String normalizeAudioFormat(
             String audioFormat
     ) throws IOException {
