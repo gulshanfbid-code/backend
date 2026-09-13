@@ -44,3 +44,17 @@ application-local.yml
 # Temporary downloader files
 temp/
 downloads/
+# Secrets and local configuration
+*.secret
+*.key
+*.pem
+
+# Build and local IDE state
+target/
+.idea/
+
+# Local downloaded media
+downloads/*
+!downloads/.gitkeep
+
+*.log

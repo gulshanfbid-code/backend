@@ -8,6 +8,7 @@ public class DownloadData {
     private String mode;
     private String quality;
     private String audioFormat;
+    private String platform;
 
     public DownloadData() {
     }
@@ -39,4 +40,7 @@ public class DownloadData {
 
     public String getAudioFormat() { return audioFormat; }
     public void setAudioFormat(String audioFormat) { this.audioFormat = audioFormat; }
+
+    public String getPlatform() { return platform; }
+    public void setPlatform(String platform) { this.platform = platform; }
 }

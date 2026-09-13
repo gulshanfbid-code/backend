@@ -2,10 +2,13 @@ package com.instagram.backend.controller;
 
 import com.instagram.backend.dto.DownloadRequest;
 import com.instagram.backend.dto.DownloadResponse;
+import com.instagram.backend.dto.VideoInfoResponse;
 import com.instagram.backend.service.DownloadService;
+import com.instagram.backend.service.VideoInfoService;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.MediaTypeFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -14,22 +17,19 @@ import org.springframework.web.bind.annotation.*;
 public class DownloadController {
 
     private final DownloadService downloadService;
+    private final VideoInfoService videoInfoService;
 
-    public DownloadController(
-            DownloadService downloadService
-    ) {
+    public DownloadController(DownloadService downloadService,
+                              VideoInfoService videoInfoService) {
         this.downloadService = downloadService;
+        this.videoInfoService = videoInfoService;
     }
 
-    /**
-     * Starts the media download.
-     *
-     * POST /api/download
-     */
     @PostMapping
-    public DownloadResponse download(
-            @RequestBody DownloadRequest request
-    ) {
+    public DownloadResponse download(@RequestBody DownloadRequest request) {
+        if (request == null || request.getUrl() == null || request.getUrl().isBlank()) {
+            return new DownloadResponse("error", "URL is required", null);
+        }
 
         return downloadService.downloadMedia(
                 request.getUrl(),
@@ -39,88 +39,32 @@ public class DownloadController {
         );
     }
 
-    /**
-     * Returns the downloaded file.
-     *
-     * GET /api/download/file?fileName=...
-     */
+    @GetMapping("/validate")
+    public DownloadResponse validate(@RequestParam String url) {
+        return downloadService.validateUrl(url);
+    }
+
+    @GetMapping("/info")
+    public VideoInfoResponse info(@RequestParam String url) {
+        return videoInfoService.getVideoInfo(url);
+    }
+
     @GetMapping("/file")
-    public ResponseEntity<Resource> downloadFile(
-            @RequestParam String fileName
-    ) {
+    public ResponseEntity<Resource> downloadFile(@RequestParam String fileName) {
+        Resource resource = downloadService.getDownloadedFile(fileName);
+        String filename = resource.getFilename();
 
-        Resource resource =
-                downloadService.getDownloadedFile(
-                        fileName
-                );
-
-        String filename =
-                resource.getFilename();
-
-        /*
-         * Default MIME type.
-         */
-        MediaType mediaType =
-                MediaType.APPLICATION_OCTET_STREAM;
-
-        /*
-         * Detect the actual media type from
-         * the downloaded file extension.
-         */
-        if (filename != null) {
-
-            String lowerCaseFilename =
-                    filename.toLowerCase();
-
-            if (lowerCaseFilename.endsWith(".mp4")) {
-
-                mediaType =
-                        MediaType.parseMediaType(
-                                "video/mp4"
-                        );
-
-            } else if (
-                    lowerCaseFilename.endsWith(".mp3")
-            ) {
-
-                mediaType =
-                        MediaType.parseMediaType(
-                                "audio/mpeg"
-                        );
-
-            } else if (
-                    lowerCaseFilename.endsWith(".m4a")
-            ) {
-
-                mediaType =
-                        MediaType.parseMediaType(
-                                "audio/mp4"
-                        );
-            }
-        }
+        // Spring 7 / Spring Boot 4 rejects wildcard media types (video/*, audio/*)
+        // in ResponseEntity.contentType(). Resolve a concrete MIME type instead.
+        MediaType mediaType = filename == null
+                ? MediaType.APPLICATION_OCTET_STREAM
+                : MediaTypeFactory.getMediaType(filename)
+                    .orElse(MediaType.APPLICATION_OCTET_STREAM);
 
         return ResponseEntity.ok()
-
-                /*
-                 * Tell the browser the correct
-                 * media type.
-                 */
                 .contentType(mediaType)
-
-                /*
-                 * Force the browser to download
-                 * the file using its real filename.
-                 */
-                .header(
-                        HttpHeaders.CONTENT_DISPOSITION,
-                        "attachment; filename=\"" +
-                                filename +
-                                "\""
-                )
-
-                /*
-                 * Send the actual downloaded file.
-                 */
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" +
+                        java.net.URLEncoder.encode(filename == null ? "download" : filename, java.nio.charset.StandardCharsets.UTF_8).replace("+", "%20"))
                 .body(resource);
     }
 }
