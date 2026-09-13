@@ -37,6 +37,10 @@ COPY --from=build /app/target/*.jar app.jar
 # Download directory
 RUN mkdir -p /app/downloads
 
-EXPOSE 8080
+ENV YT_DLP_PATH=/usr/local/bin/yt-dlp
+ENV YT_DLP_FFMPEG_PATH=/usr/bin/ffmpeg
+ENV YT_DLP_DOWNLOAD_DIR=/app/downloads
+
+EXPOSE 8888
 
 ENTRYPOINT ["java", "-jar", "app.jar"]

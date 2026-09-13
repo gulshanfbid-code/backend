@@ -3,6 +3,7 @@ package com.instagram.backend.service;
 import com.instagram.backend.config.YtDlpConfig;
 import com.instagram.backend.dto.DownloadData;
 import com.instagram.backend.dto.DownloadResponse;
+import com.instagram.backend.util.Platform;
 import com.instagram.backend.util.UrlValidator;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
@@ -19,191 +20,123 @@ public class DownloadService {
 
     private final YtDlpService ytDlpService;
     private final YtDlpConfig ytDlpConfig;
+    private final PlatformDetector platformDetector;
 
-    public DownloadService(
-            YtDlpService ytDlpService,
-            YtDlpConfig ytDlpConfig
-    ) {
+    public DownloadService(YtDlpService ytDlpService,
+                           YtDlpConfig ytDlpConfig,
+                           PlatformDetector platformDetector) {
         this.ytDlpService = ytDlpService;
         this.ytDlpConfig = ytDlpConfig;
+        this.platformDetector = platformDetector;
     }
 
     public DownloadResponse validateUrl(String url) {
+        Platform platform = platformDetector.detect(url);
 
-        if (!UrlValidator.isValidInstagramUrl(url)) {
+        if (platform == null) {
             return new DownloadResponse(
                     "error",
-                    "Invalid Instagram URL",
+                    "Unsupported URL. Supported platforms: Instagram, Facebook, YouTube, TikTok and X.",
                     null
             );
         }
 
         return new DownloadResponse(
                 "success",
-                "Valid Instagram URL",
-                null
+                "Valid " + platform.getDisplayName() + " URL",
+                platform.getDisplayName()
         );
     }
 
-    public DownloadResponse downloadMedia(
-            String url,
-            String mode,
-            String quality,
-            String audioFormat
-    ) {
+    public DownloadResponse downloadMedia(String url,
+                                           String mode,
+                                           String quality,
+                                           String audioFormat) {
 
-        if (!UrlValidator.isValidInstagramUrl(url)) {
+        Platform platform = platformDetector.detect(url);
+
+        if (platform == null) {
             return new DownloadResponse(
                     "error",
-                    "Invalid Instagram URL",
+                    "Unsupported URL. Supported platforms: Instagram, Facebook, YouTube, TikTok and X.",
                     null
             );
         }
 
-        String normalizedMode =
-                mode == null || mode.isBlank()
-                        ? "video"
-                        : mode.trim().toLowerCase();
-
-        String normalizedQuality =
-                quality == null || quality.isBlank()
-                        ? "best"
-                        : quality.trim().toLowerCase();
-
-        String normalizedAudioFormat =
-                audioFormat == null || audioFormat.isBlank()
-                        ? "mp3"
-                        : audioFormat.trim().toLowerCase();
+        String normalizedMode = normalizeOrDefault(mode, "video");
+        String normalizedQuality = normalizeOrDefault(quality, "best");
+        String normalizedAudioFormat = normalizeOrDefault(audioFormat, "mp3");
 
         try {
+            File downloadedFile = ytDlpService.downloadMedia(
+                    url.trim(),
+                    normalizedMode,
+                    normalizedQuality,
+                    normalizedAudioFormat
+            );
 
-            File downloadedFile =
-                    ytDlpService.downloadMedia(
-                            url,
-                            normalizedMode,
-                            normalizedQuality,
-                            normalizedAudioFormat
-                    );
-
-            if (downloadedFile == null ||
-                    !downloadedFile.exists()) {
-
-                return new DownloadResponse(
-                        "error",
-                        "Media download failed",
-                        null
-                );
+            if (downloadedFile == null || !downloadedFile.exists() || downloadedFile.length() == 0) {
+                return new DownloadResponse("error", "Media download failed", null);
             }
 
-            String fileName =
-                    downloadedFile.getName();
+            String fileName = downloadedFile.getName();
+            String filePath = downloadedFile.getAbsolutePath();
+            String encodedFileName = URLEncoder.encode(fileName, StandardCharsets.UTF_8);
+            String downloadUrl = "/api/download/file?fileName=" + encodedFileName;
 
-            String filePath =
-                    downloadedFile.getAbsolutePath();
-
-            /*
-             * Encode the filename before putting it
-             * inside the URL query parameter.
-             *
-             * Example:
-             *
-             * Original:
-             * Video by demicstory [Dc3wfDUlmvT].mp4
-             *
-             * Encoded:
-             * Video+by+demicstory+%5BDc3wfDUlmvT%5D.mp4
-             */
-            String encodedFileName =
-                    URLEncoder.encode(
-                            fileName,
-                            StandardCharsets.UTF_8
-                    );
-
-            String downloadUrl =
-                    "/api/download/file?fileName=" +
-                            encodedFileName;
-
-            DownloadData data =
-                    new DownloadData(
-                            fileName,
-                            filePath,
-                            downloadUrl,
-                            normalizedMode,
-                            normalizedQuality,
-                            normalizedAudioFormat
-                    );
+            DownloadData data = new DownloadData(
+                    fileName,
+                    filePath,
+                    downloadUrl,
+                    normalizedMode,
+                    normalizedQuality,
+                    normalizedAudioFormat
+            );
+            data.setPlatform(platform.getDisplayName());
 
             return new DownloadResponse(
                     "success",
-                    "Media downloaded successfully",
+                    platform.getDisplayName() + " media downloaded successfully",
                     data
             );
-
         } catch (Exception exception) {
-
+            String message = exception.getMessage();
             return new DownloadResponse(
                     "error",
-                    exception.getMessage() == null
-                            ? "Media download failed"
-                            : exception.getMessage(),
+                    message == null || message.isBlank() ? "Media download failed" : message,
                     null
             );
         }
     }
 
-    public Resource getDownloadedFile(
-            String fileName
-    ) {
+    public Resource getDownloadedFile(String fileName) {
+        if (fileName == null || fileName.isBlank()) {
+            throw new RuntimeException("File name is required");
+        }
 
         try {
+            Path downloadDirectory = Paths.get(ytDlpConfig.getDownloadDir())
+                    .toAbsolutePath()
+                    .normalize();
 
-            Path downloadDirectory =
-                    Paths.get(
-                                    ytDlpConfig.getDownloadDir()
-                            )
-                            .toAbsolutePath()
-                            .normalize();
+            Path requestedFile = downloadDirectory.resolve(fileName).normalize();
 
-            Path requestedFile =
-                    downloadDirectory
-                            .resolve(fileName)
-                            .normalize();
-
-            /*
-             * Security check:
-             * Prevent ../ path traversal.
-             */
-            if (!requestedFile.startsWith(
-                    downloadDirectory
-            )) {
-
-                throw new RuntimeException(
-                        "Invalid file path"
-                );
+            if (!requestedFile.startsWith(downloadDirectory)) {
+                throw new RuntimeException("Invalid file path");
             }
 
-            Resource resource =
-                    new FileSystemResource(
-                            requestedFile
-                    );
-
-            if (!resource.exists()
-                    || !resource.isReadable()) {
-
-                throw new RuntimeException(
-                        "File not found: " + fileName
-                );
+            Resource resource = new FileSystemResource(requestedFile);
+            if (!resource.exists() || !resource.isReadable()) {
+                throw new RuntimeException("File not found: " + fileName);
             }
 
             return resource;
-
         } catch (Exception exception) {
-
-            throw new RuntimeException(
-                    "Unable to download file: "
-                            + exception.getMessage(),
-                    exception
-            );
+            throw new RuntimeException("Unable to download file: " + exception.getMessage(), exception);
         }
+    }
+
+    private String normalizeOrDefault(String value, String defaultValue) {
+        return value == null || value.isBlank() ? defaultValue : value.trim().toLowerCase();
     }
 }
